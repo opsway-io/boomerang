@@ -8,7 +8,6 @@ import (
 
 var ErrInvalidPayloadType = errors.New("invalid payload type")
 
-//easyjson:json
 type Task struct {
 	Type    string
 	Routes  []string
@@ -17,6 +16,9 @@ type Task struct {
 	Payload any
 }
 
+// Creates a new task with the given task type, id and payload.
+// One copy of the task will be sent to each route.
+// For more information about the cron expression, see https://github.com/gorhill/cronexpr
 func NewTask(taskType string, routes []string, cronExpr string, id string, payload any) Task {
 	return Task{
 		Type:    taskType,
