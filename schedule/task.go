@@ -3,7 +3,7 @@ package schedule
 import (
 	"errors"
 
-	"github.com/mailru/easyjson"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 var ErrInvalidPayloadType = errors.New("invalid payload type")
@@ -28,13 +28,13 @@ func NewTask(taskType string, routes []string, cronExpr string, id string, paylo
 }
 
 func MarshalTask(task Task) ([]byte, error) {
-	return easyjson.Marshal(task)
+	return msgpack.Marshal(task)
 }
 
 func UnmarshalTask(data []byte) (Task, error) {
 	var task Task
-	if err := easyjson.Unmarshal(data, &task); err != nil {
-		return Task{}, err
+	if err := msgpack.Unmarshal(data, &task); err != nil {
+		return task, err
 	}
 
 	return task, nil
