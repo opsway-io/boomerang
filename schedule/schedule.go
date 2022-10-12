@@ -15,13 +15,13 @@ var (
 	ErrTaskNotExists     = errors.New("task does not exists")
 )
 
-type Scheduler interface {
+type Schedule interface {
 	AddTask(ctx context.Context, task Task) error
 	RemoveTask(ctx context.Context, id string) error
 	GetTask(ctx context.Context, id string) (*Task, error)
 	RunTaskNow(ctx context.Context, id string) error
 	Consume(ctx context.Context, eventType string, routes []string, handler func(ctx context.Context, task Task) error) error
-	Schedule(ctx context.Context) error
+	Run(ctx context.Context) error
 	ClearAll(ctx context.Context) error
 }
 
@@ -32,7 +32,7 @@ type SchedulerImpl struct {
 	Queue           Queue
 }
 
-func NewScheduler(cli *redis.Client) Scheduler {
+func NewSchedule(cli *redis.Client) Schedule {
 	return &SchedulerImpl{
 		scheduleSetName: "schedule",
 		taskSetName:     "task",
@@ -110,7 +110,7 @@ func (s *SchedulerImpl) RunTaskNow(ctx context.Context, id string) error {
 	return s.Queue.Add(ctx, task)
 }
 
-func (s *SchedulerImpl) Schedule(ctx context.Context) error {
+func (s *SchedulerImpl) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():

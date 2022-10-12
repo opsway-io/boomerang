@@ -22,7 +22,7 @@ func main() {
 		DB:       0,
 	})
 
-	sch := schedule.NewScheduler(cli)
+	sch := schedule.NewSchedule(cli)
 	if err := sch.ClearAll(ctx); err != nil {
 		panic(err)
 	}
@@ -60,7 +60,7 @@ func main() {
 			wg.Add(1)
 			defer wg.Done()
 
-			if err := sch.Schedule(ctx); err != nil {
+			if err := sch.Run(ctx); err != nil {
 				panic(err)
 			}
 		}()
