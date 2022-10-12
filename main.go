@@ -38,7 +38,10 @@ func main() {
 			err := sch.Consume(
 				ctx,
 				"http_probe",
-				[]string{"eu-central-1"},
+				[]string{
+					"eu-central-1",
+					"eu-central-2",
+				},
 				func(ctx context.Context, task schedule.Task) error {
 					fmt.Println("Got task", task.ID)
 
@@ -66,13 +69,16 @@ func main() {
 
 	// Add some tasks
 
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 10000; i++ {
 		id := fmt.Sprintf("%d", i)
 
 		task := schedule.NewTask(
 			"http_probe",
-			[]string{"eu-central-1"},
-			"* * * * * * *",
+			[]string{
+				"eu-central-1",
+				"eu-central-2",
+			},
+			"1/5 * * * * * *",
 			id,
 			"payload",
 		)

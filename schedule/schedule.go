@@ -18,7 +18,6 @@ var (
 type Scheduler interface {
 	AddTask(ctx context.Context, task Task) error
 	RemoveTask(ctx context.Context, id string) error
-	DoesTaskExist(ctx context.Context, id string) (bool, error)
 	GetTask(ctx context.Context, id string) (*Task, error)
 	RunTaskNow(ctx context.Context, id string) error
 
@@ -30,7 +29,7 @@ type Scheduler interface {
 
 type SchedulerImpl struct {
 	scheduleSetName string
-	payloadSetName  string
+	taskSetName     string
 	cli             *redis.Client
 	consumerQueue   Queue
 }
@@ -38,22 +37,13 @@ type SchedulerImpl struct {
 func NewScheduler(cli *redis.Client) Scheduler {
 	return &SchedulerImpl{
 		scheduleSetName: "schedule",
-		payloadSetName:  "payload",
+		taskSetName:     "task",
 		cli:             cli,
 		consumerQueue:   newQueue(cli, 1000000),
 	}
 }
 
 func (s *SchedulerImpl) AddTask(ctx context.Context, task Task) error {
-	exists, err := s.DoesTaskExist(ctx, task.ID)
-	if err != nil {
-		return err
-	}
-
-	if exists {
-		return ErrTaskAlreadyExists
-	}
-
 	task.Routes = unique(task.Routes)
 	sort.Strings(task.Routes)
 
@@ -68,7 +58,7 @@ func (s *SchedulerImpl) AddTask(ctx context.Context, task Task) error {
 	}
 
 	pipe := s.cli.WithContext(ctx).Pipeline()
-	pipe.HSet(s.payloadSetName, task.ID, taskJson)
+	pipe.HSet(s.taskSetName, task.ID, taskJson)
 	pipe.ZAdd(s.scheduleSetName, redis.Z{
 		Score:  float64(cr.Next(time.Now()).UnixMilli()),
 		Member: task.ID,
@@ -81,7 +71,7 @@ func (s *SchedulerImpl) AddTask(ctx context.Context, task Task) error {
 func (s *SchedulerImpl) RemoveTask(ctx context.Context, id string) error {
 	pipe := s.cli.WithContext(ctx).Pipeline()
 	pipe.ZRem(s.scheduleSetName, id)
-	pipe.HDel(s.payloadSetName, id)
+	pipe.HDel(s.taskSetName, id)
 	res, err := pipe.Exec()
 	if err != nil {
 		return err
@@ -94,21 +84,8 @@ func (s *SchedulerImpl) RemoveTask(ctx context.Context, id string) error {
 	return nil
 }
 
-func (s *SchedulerImpl) DoesTaskExist(ctx context.Context, id string) (bool, error) {
-	res := s.cli.WithContext(ctx).HGet(s.payloadSetName, id)
-	if err := res.Err(); err != nil {
-		if err == redis.Nil {
-			return false, nil
-		}
-
-		return false, err
-	}
-
-	return res.Val() != "", nil
-}
-
 func (s *SchedulerImpl) GetTask(ctx context.Context, id string) (*Task, error) {
-	res := s.cli.WithContext(ctx).HGet(s.payloadSetName, id)
+	res := s.cli.WithContext(ctx).HGet(s.taskSetName, id)
 	if err := res.Err(); err != nil {
 		return nil, err
 	}
@@ -122,7 +99,7 @@ func (s *SchedulerImpl) GetTask(ctx context.Context, id string) (*Task, error) {
 }
 
 func (s *SchedulerImpl) RunTaskNow(ctx context.Context, id string) error {
-	taskResult := s.cli.WithContext(ctx).HGet(s.payloadSetName, id)
+	taskResult := s.cli.WithContext(ctx).HGet(s.taskSetName, id)
 	if err := taskResult.Err(); err != nil {
 		return err
 	}
@@ -170,7 +147,7 @@ func (s *SchedulerImpl) Schedule(ctx context.Context) error {
 				return errors.New("id is not string")
 			}
 
-			taskResult := s.cli.WithContext(ctx).HGet(s.payloadSetName, id)
+			taskResult := s.cli.WithContext(ctx).HGet(s.taskSetName, id)
 			if err := taskResult.Err(); err != nil {
 				return err
 			}
