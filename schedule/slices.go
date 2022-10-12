@@ -1,4 +1,4 @@
-package boomerang
+package schedule
 
 func unique[V comparable](slice []V) []V {
 	keys := make(map[V]bool)

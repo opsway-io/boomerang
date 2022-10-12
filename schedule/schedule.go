@@ -1,4 +1,4 @@
-package boomerang
+package schedule
 
 import (
 	"context"
@@ -16,13 +16,13 @@ var (
 )
 
 type Scheduler interface {
-	AddTask(ctx context.Context, typ string, id string, payload any, cronExpr string, tags []string) error
+	AddTask(ctx context.Context, task Task) error
 	RemoveTask(ctx context.Context, id string) error
 	DoesTaskExist(ctx context.Context, id string) (bool, error)
 	GetTask(ctx context.Context, id string) (*Task, error)
 	RunTaskNow(ctx context.Context, id string) error
 
-	Consume(typ string, tags []string, handler func(ctx context.Context, task Task) error) error
+	Consume(ctx context.Context, eventType string, routes []string, handler func(ctx context.Context, task Task) error) error
 	Schedule(ctx context.Context) error
 
 	ClearAll(ctx context.Context) error
@@ -40,12 +40,12 @@ func NewScheduler(cli *redis.Client) Scheduler {
 		scheduleSetName: "schedule",
 		payloadSetName:  "payload",
 		cli:             cli,
-		consumerQueue:   newQueue(cli),
+		consumerQueue:   newQueue(cli, 1000000),
 	}
 }
 
-func (s *SchedulerImpl) AddTask(ctx context.Context, typ string, id string, payload any, cronExpr string, tags []string) error {
-	exists, err := s.DoesTaskExist(ctx, id)
+func (s *SchedulerImpl) AddTask(ctx context.Context, task Task) error {
+	exists, err := s.DoesTaskExist(ctx, task.ID)
 	if err != nil {
 		return err
 	}
@@ -54,24 +54,24 @@ func (s *SchedulerImpl) AddTask(ctx context.Context, typ string, id string, payl
 		return ErrTaskAlreadyExists
 	}
 
-	tags = unique(tags)
-	sort.Strings(tags)
+	task.Routes = unique(task.Routes)
+	sort.Strings(task.Routes)
 
-	taskJson, err := MarshalTask(NewTask(id, typ, cronExpr, tags, payload))
+	cr, err := cronexpr.Parse(task.Cron)
 	if err != nil {
 		return err
 	}
 
-	cr, err := cronexpr.Parse(cronExpr)
+	taskJson, err := MarshalTask(task)
 	if err != nil {
 		return err
 	}
 
 	pipe := s.cli.WithContext(ctx).Pipeline()
-	pipe.HSet(s.payloadSetName, id, taskJson)
+	pipe.HSet(s.payloadSetName, task.ID, taskJson)
 	pipe.ZAdd(s.scheduleSetName, redis.Z{
 		Score:  float64(cr.Next(time.Now()).UnixMilli()),
-		Member: id,
+		Member: task.ID,
 	})
 	_, err = pipe.Exec()
 
@@ -95,7 +95,7 @@ func (s *SchedulerImpl) RemoveTask(ctx context.Context, id string) error {
 }
 
 func (s *SchedulerImpl) DoesTaskExist(ctx context.Context, id string) (bool, error) {
-	res := s.cli.WithContext(ctx).ZScore(s.scheduleSetName, id)
+	res := s.cli.WithContext(ctx).HGet(s.payloadSetName, id)
 	if err := res.Err(); err != nil {
 		if err == redis.Nil {
 			return false, nil
@@ -104,7 +104,7 @@ func (s *SchedulerImpl) DoesTaskExist(ctx context.Context, id string) (bool, err
 		return false, err
 	}
 
-	return res.Val() != 0, nil
+	return res.Val() != "", nil
 }
 
 func (s *SchedulerImpl) GetTask(ctx context.Context, id string) (*Task, error) {
@@ -132,7 +132,7 @@ func (s *SchedulerImpl) RunTaskNow(ctx context.Context, id string) error {
 		return err
 	}
 
-	return s.consumerQueue.Enqueue(context.Background(), task)
+	return s.consumerQueue.Enqueue(ctx, task)
 }
 
 func (s *SchedulerImpl) Schedule(ctx context.Context) error {
@@ -144,9 +144,8 @@ func (s *SchedulerImpl) Schedule(ctx context.Context) error {
 			// Get next scheduled task
 			res := s.cli.WithContext(ctx).ZPopMin(s.scheduleSetName, 1)
 			if err := res.Err(); err != nil {
-				panic(err)
+				return err
 			}
-
 			if len(res.Val()) == 0 {
 				continue
 			}
@@ -158,7 +157,11 @@ func (s *SchedulerImpl) Schedule(ctx context.Context) error {
 			delta := score - now
 
 			if delta > 0 {
-				time.Sleep(time.Duration(delta) * time.Millisecond)
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-time.After(time.Duration(delta) * time.Millisecond):
+				}
 			}
 
 			// Get task payload
@@ -192,23 +195,18 @@ func (s *SchedulerImpl) Schedule(ctx context.Context) error {
 				Score:  float64(nextScore),
 				Member: id,
 			}).Err(); err != nil {
-				panic(err)
+				return err
 			}
 		}
 	}
 }
 
-func (s *SchedulerImpl) Consume(typ string, tags []string, handler func(ctx context.Context, task Task) error) error {
-	return s.consumerQueue.Consume(typ, tags, handler)
+func (s *SchedulerImpl) Consume(ctx context.Context, eventType string, routes []string, handler func(ctx context.Context, task Task) error) error {
+	return s.consumerQueue.Consume(ctx, eventType, routes, handler)
 }
 
 func (s *SchedulerImpl) ClearAll(ctx context.Context) error {
-	pipe := s.cli.WithContext(ctx).Pipeline()
-	pipe.Del(s.scheduleSetName)
-	pipe.Del(s.payloadSetName)
-	_, err := pipe.Exec()
-
-	return err
+	return s.cli.WithContext(ctx).FlushDB().Err()
 }
 
 func (s *SchedulerImpl) nextTimeStamp(cronExpr string, prevScore int64) (int64, error) {

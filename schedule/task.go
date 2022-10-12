@@ -1,4 +1,4 @@
-package boomerang
+package schedule
 
 import (
 	"errors"
@@ -10,19 +10,19 @@ var ErrInvalidPayloadType = errors.New("invalid payload type")
 
 //easyjson:json
 type Task struct {
-	ID      string
 	Type    string
+	Routes  []string
 	Cron    string
-	Tags    []string
+	ID      string
 	Payload any
 }
 
-func NewTask(id string, typ string, cron string, tags []string, payload any) Task {
+func NewTask(taskType string, routes []string, cronExpr string, id string, payload any) Task {
 	return Task{
+		Type:    taskType,
+		Routes:  routes,
+		Cron:    cronExpr,
 		ID:      id,
-		Type:    typ,
-		Cron:    cron,
-		Tags:    tags,
 		Payload: payload,
 	}
 }
