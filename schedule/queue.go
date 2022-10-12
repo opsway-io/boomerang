@@ -11,7 +11,7 @@ import (
 )
 
 type Queue interface {
-	Enqueue(ctx context.Context, task Task) error
+	Add(ctx context.Context, task Task) error
 	Consume(ctx context.Context, taskType string, routes []string, handler func(ctx context.Context, task Task) error) error
 	ClearAll(ctx context.Context) error
 }
@@ -30,14 +30,19 @@ func newQueue(cli *redis.Client, maxLen int64) Queue {
 	}
 }
 
-func (q *QueueImpl) Enqueue(ctx context.Context, task Task) error {
+func (q *QueueImpl) Add(ctx context.Context, task Task) error {
+	data, err := MarshalTask(task)
+	if err != nil {
+		return err
+	}
+
 	for _, route := range task.Routes {
 		streamName := q.streamName(task.Type, route)
 
 		err := q.cli.WithContext(ctx).XAdd(&redis.XAddArgs{
 			Stream: streamName,
 			Values: map[string]interface{}{
-				"id": task.ID,
+				"data": data,
 			},
 			MaxLen: int64(q.maxLen),
 		}).Err()
@@ -95,9 +100,12 @@ func (q *QueueImpl) Consume(ctx context.Context, taskType string, routes []strin
 
 			for _, entry := range entries {
 				for _, message := range entry.Messages {
-					handler(ctx, Task{
-						ID: message.ID,
-					})
+					task, err := UnmarshalTask([]byte(message.Values["data"].(string)))
+					if err != nil {
+						return err
+					}
+
+					handler(ctx, task)
 
 					// Acknowledge the message
 					if err := q.cli.WithContext(ctx).XAck(entry.Stream, consumerGroup, message.ID).Err(); err != nil {

@@ -20,10 +20,8 @@ type Scheduler interface {
 	RemoveTask(ctx context.Context, id string) error
 	GetTask(ctx context.Context, id string) (*Task, error)
 	RunTaskNow(ctx context.Context, id string) error
-
 	Consume(ctx context.Context, eventType string, routes []string, handler func(ctx context.Context, task Task) error) error
 	Schedule(ctx context.Context) error
-
 	ClearAll(ctx context.Context) error
 }
 
@@ -31,7 +29,7 @@ type SchedulerImpl struct {
 	scheduleSetName string
 	taskSetName     string
 	cli             *redis.Client
-	consumerQueue   Queue
+	Queue           Queue
 }
 
 func NewScheduler(cli *redis.Client) Scheduler {
@@ -39,7 +37,7 @@ func NewScheduler(cli *redis.Client) Scheduler {
 		scheduleSetName: "schedule",
 		taskSetName:     "task",
 		cli:             cli,
-		consumerQueue:   newQueue(cli, 1000000),
+		Queue:           newQueue(cli, 1000000),
 	}
 }
 
@@ -109,7 +107,7 @@ func (s *SchedulerImpl) RunTaskNow(ctx context.Context, id string) error {
 		return err
 	}
 
-	return s.consumerQueue.Enqueue(ctx, task)
+	return s.Queue.Add(ctx, task)
 }
 
 func (s *SchedulerImpl) Schedule(ctx context.Context) error {
@@ -158,7 +156,7 @@ func (s *SchedulerImpl) Schedule(ctx context.Context) error {
 			}
 
 			// Add task to worker queue
-			if err := s.consumerQueue.Enqueue(ctx, task); err != nil {
+			if err := s.Queue.Add(ctx, task); err != nil {
 				return err
 			}
 
@@ -179,7 +177,7 @@ func (s *SchedulerImpl) Schedule(ctx context.Context) error {
 }
 
 func (s *SchedulerImpl) Consume(ctx context.Context, eventType string, routes []string, handler func(ctx context.Context, task Task) error) error {
-	return s.consumerQueue.Consume(ctx, eventType, routes, handler)
+	return s.Queue.Consume(ctx, eventType, routes, handler)
 }
 
 func (s *SchedulerImpl) ClearAll(ctx context.Context) error {
