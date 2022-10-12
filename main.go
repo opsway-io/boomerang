@@ -14,8 +14,7 @@ import (
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
-	var wg1 sync.WaitGroup
-	var wg2 sync.WaitGroup
+	var wg sync.WaitGroup
 
 	cli := redis.NewClient(&redis.Options{
 		Addr:     "localhost:6379",
@@ -32,8 +31,8 @@ func main() {
 
 	for i := 0; i < 100; i++ {
 		go func() {
-			wg1.Add(1)
-			defer wg1.Done()
+			wg.Add(1)
+			defer wg.Done()
 
 			err := sch.Consume(
 				ctx,
@@ -43,7 +42,7 @@ func main() {
 					"eu-central-2",
 				},
 				func(ctx context.Context, task schedule.Task) error {
-					fmt.Println("Got task", task.ID)
+					fmt.Printf("Got task: %s\n", task.ID)
 
 					return nil
 				},
@@ -58,8 +57,8 @@ func main() {
 
 	for i := 0; i < 20; i++ {
 		go func() {
-			wg2.Add(1)
-			defer wg2.Done()
+			wg.Add(1)
+			defer wg.Done()
 
 			if err := sch.Schedule(ctx); err != nil {
 				panic(err)
@@ -69,7 +68,7 @@ func main() {
 
 	// Add some tasks
 
-	for i := 0; i < 10000; i++ {
+	for i := 0; i < 1000; i++ {
 		id := fmt.Sprintf("%d", i)
 
 		task := schedule.NewTask(
@@ -98,8 +97,5 @@ func main() {
 
 	cancel()
 
-	wg1.Wait()
-	fmt.Println("wg1 done")
-	wg2.Wait()
-	fmt.Println("wg2 done")
+	wg.Wait()
 }
