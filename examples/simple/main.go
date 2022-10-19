@@ -9,7 +9,8 @@ import (
 	"syscall"
 
 	"github.com/go-redis/redis"
-	"github.com/opsway-io/boomerang/schedule"
+
+	"github.com/opsway-io/boomerang"
 )
 
 func main() {
@@ -22,7 +23,7 @@ func main() {
 		DB:       0,
 	})
 
-	sch := schedule.NewSchedule(cli)
+	sch := boomerang.NewSchedule(cli)
 	if err := sch.ClearAll(ctx); err != nil {
 		panic(err)
 	}
@@ -41,7 +42,7 @@ func main() {
 					"eu-central-1",
 					"eu-central-2",
 				},
-				func(ctx context.Context, task schedule.Task) error {
+				func(ctx context.Context, task boomerang.Task) error {
 					fmt.Printf("Got task: %s\n", task.ID)
 
 					return nil
@@ -71,7 +72,7 @@ func main() {
 	for i := 0; i < 1000; i++ {
 		id := fmt.Sprintf("%d", i)
 
-		task := schedule.NewTask(
+		task := boomerang.NewTask(
 			"http_probe",
 			[]string{
 				"eu-central-1",

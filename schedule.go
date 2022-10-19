@@ -11,8 +11,8 @@ import (
 )
 
 var (
-	ErrTaskAlreadyExists = errors.New("task already exists")
-	ErrTaskNotExists     = errors.New("task does not exists")
+	ErrTaskAlreadyExist = errors.New("task already exist")
+	ErrTaskDoesNotExist = errors.New("task does not exist")
 )
 
 type Schedule interface {
@@ -76,7 +76,7 @@ func (s *SchedulerImpl) RemoveTask(ctx context.Context, id string) error {
 	}
 
 	if res[0].(*redis.IntCmd).Val() == 0 {
-		return ErrTaskNotExists
+		return ErrTaskDoesNotExist
 	}
 
 	return nil
