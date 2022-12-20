@@ -26,10 +26,7 @@ func main() {
 
 	// create a queue
 
-	q, err := NewSchedule(cli)
-	if err != nil {
-		panic(err)
-	}
+	sch := NewSchedule(cli)
 
 	// add a task
 
@@ -43,12 +40,12 @@ func main() {
 			},
 		)
 
-		if err := q.Add(ctx, task); err != nil {
+		if err := sch.Add(ctx, task); err != nil {
 			panic(err)
 		}
 	}
 
-	if err := q.On(ctx, "test", func(ctx context.Context, task *Task) {
+	if err := sch.On(ctx, "test", func(ctx context.Context, task *Task) {
 		fmt.Printf("Executing: %v %v %v\n", task.Kind, task.ID, task.Interval)
 	}); err != nil {
 		panic(err)

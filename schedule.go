@@ -26,10 +26,10 @@ type ScheduleImpl struct {
 	redisClient *redis.Client
 }
 
-func NewSchedule(redisClient *redis.Client) (Schedule, error) {
+func NewSchedule(redisClient *redis.Client) Schedule {
 	return &ScheduleImpl{
 		redisClient: redisClient,
-	}, nil
+	}
 }
 
 func (s *ScheduleImpl) Add(ctx context.Context, task *Task) error {
@@ -45,8 +45,7 @@ func (s *ScheduleImpl) Add(ctx context.Context, task *Task) error {
 
 	// Find the next execution time
 
-	now := time.Now()
-	nextTick := now.Add(task.Interval).UnixMilli()
+	nextTick := time.Now().Add(task.Interval).UnixMilli()
 
 	// Execute redis script to
 	// add the task to the sorted set
