@@ -1,4 +1,4 @@
-package schedule
+package boomerang
 
 import (
 	"context"
@@ -10,27 +10,11 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
-type Task struct {
-	Kind     string
-	ID       string
-	Interval time.Duration
-	Data     any
-}
-
-func NewTask(kind, id string, interval time.Duration, data any) *Task {
-	return &Task{
-		Kind:     kind,
-		ID:       id,
-		Interval: interval,
-		Data:     data,
-	}
-}
-
-type Queue interface {
+type Schedule interface {
 	Add(ctx context.Context, task *Task) error
 	Remove(ctx context.Context, kind string, id string) error
 	RunNow(ctx context.Context, kind string, id string) error
-	On(ctx context.Context, kind string, handler func(task *Task)) error
+	On(ctx context.Context, kind string, handler func(ctx context.Context, task *Task)) error
 }
 
 type TaskData struct {
@@ -38,17 +22,17 @@ type TaskData struct {
 	Data     any
 }
 
-type QueueImpl struct {
+type ScheduleImpl struct {
 	redisClient *redis.Client
 }
 
-func NewQueue(redisClient *redis.Client) (Queue, error) {
-	return &QueueImpl{
+func NewSchedule(redisClient *redis.Client) (Schedule, error) {
+	return &ScheduleImpl{
 		redisClient: redisClient,
 	}, nil
 }
 
-func (s *QueueImpl) Add(ctx context.Context, task *Task) error {
+func (s *ScheduleImpl) Add(ctx context.Context, task *Task) error {
 	// Marshal the task data
 
 	payload, err := json.Marshal(TaskData{
@@ -85,7 +69,7 @@ func (s *QueueImpl) Add(ctx context.Context, task *Task) error {
 		ctx,
 		s.redisClient,
 		[]string{
-			s.taskQueueKey(task.Kind),
+			s.taskScheduleKey(task.Kind),
 			s.taskDataKey(task.Kind),
 		},
 		task.ID,
@@ -98,7 +82,7 @@ func (s *QueueImpl) Add(ctx context.Context, task *Task) error {
 	return nil
 }
 
-func (s *QueueImpl) Remove(ctx context.Context, kind string, id string) error {
+func (s *ScheduleImpl) Remove(ctx context.Context, kind string, id string) error {
 	// Remove the task from the sorted set and the task data from the hash set
 
 	script := redis.NewScript(`
@@ -116,7 +100,7 @@ func (s *QueueImpl) Remove(ctx context.Context, kind string, id string) error {
 		ctx,
 		s.redisClient,
 		[]string{
-			s.taskQueueKey(kind),
+			s.taskScheduleKey(kind),
 			s.taskDataKey(kind),
 		},
 		id,
@@ -127,7 +111,7 @@ func (s *QueueImpl) Remove(ctx context.Context, kind string, id string) error {
 	return nil
 }
 
-func (s *QueueImpl) RunNow(ctx context.Context, kind string, id string) error {
+func (s *ScheduleImpl) RunNow(ctx context.Context, kind string, id string) error {
 	// Add the task to the sorted set with a score of now
 
 	script := redis.NewScript(`
@@ -144,7 +128,7 @@ func (s *QueueImpl) RunNow(ctx context.Context, kind string, id string) error {
 		ctx,
 		s.redisClient,
 		[]string{
-			s.taskQueueKey(kind),
+			s.taskScheduleKey(kind),
 		},
 		id,
 		float64(time.Now().UnixMilli()),
@@ -155,8 +139,8 @@ func (s *QueueImpl) RunNow(ctx context.Context, kind string, id string) error {
 	return nil
 }
 
-func (s *QueueImpl) On(ctx context.Context, kind string, handler func(task *Task)) error {
-	queueKey := s.taskQueueKey(kind)
+func (s *ScheduleImpl) On(ctx context.Context, kind string, handler func(ctx context.Context, task *Task)) error {
+	queueKey := s.taskScheduleKey(kind)
 
 	script := redis.NewScript(`
 		local queueKey = KEYS[1]
@@ -195,6 +179,10 @@ func (s *QueueImpl) On(ctx context.Context, kind string, handler func(task *Task
 	`)
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
 		taskDataKey := s.taskDataKey(kind)
 
 		res := script.Run(
@@ -216,9 +204,12 @@ func (s *QueueImpl) On(ctx context.Context, kind string, handler func(task *Task
 		}
 
 		if len(resSlice) != 3 {
-			time.Sleep(1 * time.Second)
-
-			continue
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(1 * time.Second):
+				continue
+			}
 		}
 
 		id, ok := resSlice[0].(string)
@@ -246,7 +237,7 @@ func (s *QueueImpl) On(ctx context.Context, kind string, handler func(task *Task
 			return err
 		}
 
-		handler(&Task{
+		go handler(ctx, &Task{
 			ID:       id,
 			Kind:     kind,
 			Interval: time.Duration(taskData.Interval) * time.Millisecond,
@@ -255,10 +246,10 @@ func (s *QueueImpl) On(ctx context.Context, kind string, handler func(task *Task
 	}
 }
 
-func (s *QueueImpl) taskDataKey(kind string) string {
+func (s *ScheduleImpl) taskDataKey(kind string) string {
 	return fmt.Sprintf("data:%s", kind)
 }
 
-func (s *QueueImpl) taskQueueKey(kind string) string {
-	return fmt.Sprintf("queue:%s", kind)
+func (s *ScheduleImpl) taskScheduleKey(kind string) string {
+	return fmt.Sprintf("schedule:%s", kind)
 }

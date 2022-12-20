@@ -1,11 +1,9 @@
-package main
+package boomerang
 
 import (
 	"context"
 	"fmt"
 	"time"
-
-	"boomerang/internal/schedule"
 
 	"github.com/go-redis/redis/v8"
 )
@@ -28,18 +26,18 @@ func main() {
 
 	// create a queue
 
-	q, err := schedule.NewQueue(cli)
+	q, err := NewSchedule(cli)
 	if err != nil {
 		panic(err)
 	}
 
 	// add a task
 
-	for i := 1; i <= 1; i++ {
-		task := schedule.NewTask(
+	for i := 1; i <= 10; i++ {
+		task := NewTask(
 			"test",
 			fmt.Sprintf("%d", i),
-			time.Minute*5,
+			time.Second*5,
 			map[string]interface{}{
 				"foo": "bar",
 			},
@@ -50,7 +48,7 @@ func main() {
 		}
 	}
 
-	if err := q.On(ctx, "test", func(task *schedule.Task) {
+	if err := q.On(ctx, "test", func(ctx context.Context, task *Task) {
 		fmt.Printf("Executing: %v %v %v\n", task.Kind, task.ID, task.Interval)
 	}); err != nil {
 		panic(err)
