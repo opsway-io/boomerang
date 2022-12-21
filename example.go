@@ -50,8 +50,4 @@ func main() {
 	}); err != nil {
 		panic(err)
 	}
-
-	// wait for a bit
-
-	time.Sleep(time.Second * 10)
 }
