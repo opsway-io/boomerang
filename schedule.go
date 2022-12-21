@@ -236,7 +236,7 @@ func (s *ScheduleImpl) On(ctx context.Context, kind string, handler func(ctx con
 			return err
 		}
 
-		go handler(ctx, &Task{
+		handler(ctx, &Task{
 			ID:       id,
 			Kind:     kind,
 			Interval: time.Duration(taskData.Interval) * time.Millisecond,
