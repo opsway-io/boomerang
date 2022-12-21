@@ -1,6 +1,6 @@
 # Boomerang 🪃
 
-Simple recurring task scheduler for golang implemented on top of [redis](https://redis.io/).
+Simple distributed recurring task scheduler for golang implemented on top of [redis](https://redis.io/).
 
 ## Usage
 
