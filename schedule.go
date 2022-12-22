@@ -14,7 +14,7 @@ const redisNamespace = "boomerang"
 
 var (
 	ErrUnexpectedReturnCode     = errors.New("unexpected return code from redis")
-	ErrUnexpectedReturnCodeType = errors.New("unexpected return code type from redis, expect integer")
+	ErrUnexpectedReturnCodeType = errors.New("unexpected return code type from redis, expected integer")
 	ErrTaskAlreadyExists        = errors.New("task already exists")
 	ErrTaskDoesNotExist         = errors.New("task does not exist")
 	ErrTaskDataDoesNotExist     = errors.New("task data does not exist")
