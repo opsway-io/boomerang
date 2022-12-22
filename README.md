@@ -2,6 +2,8 @@
 
 Simple distributed recurring task scheduler for golang implemented on top of [redis](https://redis.io/).
 
+[![Test](https://github.com/opsway-io/boomerang/actions/workflows/test.yaml/badge.svg)](https://github.com/opsway-io/boomerang/actions/workflows/test.yaml)
+
 ## Usage
 
 ```go
