@@ -11,10 +11,14 @@ import (
 )
 
 const redisNamespace = "boomerang"
+
 var (
-	ErrUnexpectedReturnCodeFromRedis = errors.New("unexpected return code from redis")
-	ErrTaskAlreadyExists             = errors.New("task already exists")
-	ErrTaskDoesNotExist              = errors.New("task does not exist")
+	ErrUnexpectedReturnCode     = errors.New("unexpected return code from redis")
+	ErrUnexpectedReturnCodeType = errors.New("unexpected return code type from redis, expect integer")
+	ErrTaskAlreadyExists        = errors.New("task already exists")
+	ErrTaskDoesNotExist         = errors.New("task does not exist")
+	ErrTaskDataDoesNotExist     = errors.New("task data does not exist")
+	ErrTaskDataInvalidFormat    = errors.New("task data has invalid format, expected JSON")
 )
 
 type Schedule interface {
@@ -96,7 +100,7 @@ func (s *ScheduleImpl) Add(ctx context.Context, task *Task) error {
 	case -1:
 		return ErrTaskAlreadyExists
 	default:
-		return ErrUnexpectedReturnCodeFromRedis
+		return ErrUnexpectedReturnCode
 	}
 }
 
@@ -160,7 +164,7 @@ func (s *ScheduleImpl) Update(ctx context.Context, task *Task) error {
 	case -1:
 		return ErrTaskDoesNotExist
 	default:
-		return ErrUnexpectedReturnCodeFromRedis
+		return ErrUnexpectedReturnCode
 	}
 }
 
@@ -203,7 +207,7 @@ func (s *ScheduleImpl) Remove(ctx context.Context, kind string, id string) error
 	case -1:
 		return ErrTaskDoesNotExist
 	default:
-		return ErrUnexpectedReturnCodeFromRedis
+		return ErrUnexpectedReturnCode
 	}
 }
 
@@ -250,7 +254,7 @@ func (s *ScheduleImpl) RunNow(ctx context.Context, kind string, id string) error
 	case -1:
 		return ErrTaskDoesNotExist
 	default:
-		return ErrUnexpectedReturnCodeFromRedis
+		return ErrUnexpectedReturnCode
 	}
 }
 
@@ -267,6 +271,7 @@ func (s *ScheduleImpl) On(ctx context.Context, kind string, handler func(ctx con
 
 		local res = redis.call("ZPOPMIN", queueKey)
 		if #res == 0 then
+			-- Error: No tasks scheduled
 			return { -1 }
 		end
 
@@ -277,6 +282,8 @@ func (s *ScheduleImpl) On(ctx context.Context, kind string, handler func(ctx con
 
 		if score > (now + 1000) then
 			redis.call("ZADD", queueKey, score, id)
+
+			-- Error: Next task is scheduled for more than 1 second in the future
 			return { -1 }
 		end
 
@@ -284,12 +291,14 @@ func (s *ScheduleImpl) On(ctx context.Context, kind string, handler func(ctx con
 
 		local taskDataRaw = redis.call("HGET", taskDataKey, id)
 		if taskDataRaw == nil then
-			return { -1 }
+			-- Error: task data does not exist
+			return { -2 }
 		end
 
 		local taskData = cjson.decode(taskDataRaw)
 		if taskData == nil then
-			return { -1 }
+			-- Error: task data has invalid format
+			return { -3 }
 		end
 
 		-- Schedule the next execution
@@ -335,21 +344,38 @@ func (s *ScheduleImpl) On(ctx context.Context, kind string, handler func(ctx con
 			return err
 		}
 
-		if len(resSlice) != 3 {
+		code, ok := resSlice[0].(int64)
+		if !ok {
+			return ErrUnexpectedReturnCodeType
+		}
+
+		if code == -1 {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(1 * time.Second):
+			case <-time.After(time.Second):
 				continue
 			}
 		}
 
-		id, ok := resSlice[0].(string)
+		if code == -2 {
+			return ErrTaskDataDoesNotExist
+		}
+
+		if code == -3 {
+			return ErrTaskDataInvalidFormat
+		}
+
+		if code != 0 {
+			return ErrUnexpectedReturnCode
+		}
+
+		id, ok := resSlice[1].(string)
 		if !ok {
 			return errors.New("unexpected type for id")
 		}
 
-		score, ok := resSlice[1].(int64)
+		score, ok := resSlice[2].(int64)
 		if !ok {
 			return errors.New("unexpected type for score")
 		}
@@ -359,7 +385,7 @@ func (s *ScheduleImpl) On(ctx context.Context, kind string, handler func(ctx con
 			time.Sleep(time.Duration(delta) * time.Millisecond)
 		}
 
-		taskDataRaw, ok := resSlice[2].(string)
+		taskDataRaw, ok := resSlice[3].(string)
 		if !ok {
 			return errors.New("unexpected type for taskDataRaw")
 		}
