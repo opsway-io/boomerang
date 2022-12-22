@@ -10,6 +10,7 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
+const redisNamespace = "boomerang"
 var (
 	ErrUnexpectedReturnCodeFromRedis = errors.New("unexpected return code from redis")
 	ErrTaskAlreadyExists             = errors.New("task already exists")
@@ -378,9 +379,9 @@ func (s *ScheduleImpl) On(ctx context.Context, kind string, handler func(ctx con
 }
 
 func (s *ScheduleImpl) taskDataKey(kind string) string {
-	return fmt.Sprintf("data:%s", kind)
+	return fmt.Sprintf("%s:data:%s", redisNamespace, kind)
 }
 
 func (s *ScheduleImpl) taskScheduleKey(kind string) string {
-	return fmt.Sprintf("schedule:%s", kind)
+	return fmt.Sprintf("%s:schedule:%s", redisNamespace, kind)
 }
