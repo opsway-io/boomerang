@@ -10,8 +10,15 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
+var (
+	ErrUnexpectedReturnCodeFromRedis = errors.New("unexpected return code from redis")
+	ErrTaskAlreadyExists             = errors.New("task already exists")
+	ErrTaskDoesNotExist              = errors.New("task does not exist")
+)
+
 type Schedule interface {
 	Add(ctx context.Context, task *Task) error
+	Update(ctx context.Context, task *Task) error
 	Remove(ctx context.Context, kind string, id string) error
 	RunNow(ctx context.Context, kind string, id string) error
 	On(ctx context.Context, kind string, handler func(ctx context.Context, task *Task)) error
@@ -33,8 +40,6 @@ func NewSchedule(redisClient *redis.Client) Schedule {
 }
 
 func (s *ScheduleImpl) Add(ctx context.Context, task *Task) error {
-	// Marshal the task data
-
 	taskData, err := json.Marshal(TaskData{
 		Interval: task.Interval / time.Millisecond,
 		Data:     task.Data,
@@ -43,13 +48,7 @@ func (s *ScheduleImpl) Add(ctx context.Context, task *Task) error {
 		return err
 	}
 
-	// Find the next execution time
-
 	nextTick := time.Now().Add(task.Interval).UnixMilli()
-
-	// Execute redis script to
-	// add the task to the sorted set
-	// and the task data to the hash set
 
 	script := redis.NewScript(`
 		local queueKey = KEYS[1]
@@ -58,13 +57,24 @@ func (s *ScheduleImpl) Add(ctx context.Context, task *Task) error {
 		local taskData = ARGV[2]
 		local score = ARGV[3]
 
+		-- Check if the task exists
+
+		local exists = redis.call("HEXISTS", taskDataKey, id)
+		if exists == 1 then
+			-- Error: task already exists
+			return -1
+		end
+
+		-- Add the task to the sorted set and the task data to the hash set
+
 		redis.call("HSETNX", taskDataKey, id, taskData)
 		redis.call("ZADD", queueKey, score, id)
 
-		return 1
+		-- OK
+		return 0
 	`)
 
-	if err := script.Run(
+	code, err := script.Run(
 		ctx,
 		s.redisClient,
 		[]string{
@@ -74,28 +84,106 @@ func (s *ScheduleImpl) Add(ctx context.Context, task *Task) error {
 		task.ID,
 		taskData,
 		float64(nextTick),
-	).Err(); err != nil {
+	).Int()
+	if err != nil {
 		return err
 	}
 
-	return nil
+	switch code {
+	case 0:
+		return nil
+	case -1:
+		return ErrTaskAlreadyExists
+	default:
+		return ErrUnexpectedReturnCodeFromRedis
+	}
 }
 
-func (s *ScheduleImpl) Remove(ctx context.Context, kind string, id string) error {
-	// Remove the task from the sorted set and the task data from the hash set
+func (s *ScheduleImpl) Update(ctx context.Context, task *Task) error {
+	taskData, err := json.Marshal(TaskData{
+		Interval: task.Interval / time.Millisecond,
+		Data:     task.Data,
+	})
+	if err != nil {
+		return err
+	}
+
+	nextTick := time.Now().Add(task.Interval).UnixMilli()
 
 	script := redis.NewScript(`
 		local queueKey = KEYS[1]
 		local taskDataKey = KEYS[2]
 		local id = ARGV[1]
+		local taskData = ARGV[2]
+		local score = ARGV[3]
 
-		redis.call("HDEL", taskDataKey, id)
-		redis.call("ZREM", queueKey, id)
+		-- Check if the task exists
 
-		return 1
+		local exists = redis.call("HEXISTS", taskDataKey, id)
+		if exists == 1 then
+			-- Remove the task from the sorted set and the task data from the hash set
+			redis.call("ZREM", queueKey, id)
+			redis.call("HDEL", taskDataKey, id)
+		else
+			-- Error: task does not exist
+			return -1
+		end
+
+		-- Update the task data in the hash set and the sorted set
+
+		redis.call("HSET", taskDataKey, id, taskData)
+		redis.call("ZADD", queueKey, score, id)
+
+		-- OK
+		return 0
 	`)
 
-	if err := script.Run(
+	code, err := script.Run(
+		ctx,
+		s.redisClient,
+		[]string{
+			s.taskScheduleKey(task.Kind),
+			s.taskDataKey(task.Kind),
+		},
+		task.ID,
+		taskData,
+		float64(nextTick),
+	).Int()
+	if err != nil {
+		return err
+	}
+
+	switch code {
+	case 0:
+		return nil
+	case -1:
+		return ErrTaskDoesNotExist
+	default:
+		return ErrUnexpectedReturnCodeFromRedis
+	}
+}
+
+func (s *ScheduleImpl) Remove(ctx context.Context, kind string, id string) error {
+	script := redis.NewScript(`
+		local queueKey = KEYS[1]
+		local taskDataKey = KEYS[2]
+		local id = ARGV[1]
+
+		-- Remove task from sorted set and check if it existed
+	
+		local existed = redis.call("ZREM", queueKey, id)
+		if existed == 0 then
+			-- Error: task does not exist
+			return -1
+		end
+
+		redis.call("HDEL", taskDataKey, id)
+
+		-- OK
+		return 0
+	`)
+
+	code, err := script.Run(
 		ctx,
 		s.redisClient,
 		[]string{
@@ -103,39 +191,66 @@ func (s *ScheduleImpl) Remove(ctx context.Context, kind string, id string) error
 			s.taskDataKey(kind),
 		},
 		id,
-	).Err(); err != nil {
+	).Int()
+	if err != nil {
 		return err
 	}
 
-	return nil
+	switch code {
+	case 0:
+		return nil
+	case -1:
+		return ErrTaskDoesNotExist
+	default:
+		return ErrUnexpectedReturnCodeFromRedis
+	}
 }
 
 func (s *ScheduleImpl) RunNow(ctx context.Context, kind string, id string) error {
-	// Add the task to the sorted set with a score of now
-
 	script := redis.NewScript(`
 		local queueKey = KEYS[1]
+		local taskDataKey = KEYS[2]
 		local id = ARGV[1]
 		local score = ARGV[2]
 
+		-- Check if the task exists
+
+		local exists = redis.call("HEXISTS", taskDataKey, id)
+		if exists == 0 then
+			-- Error: task does not exist
+			return -1
+		end
+
+		-- Add it to be executed now
+
 		redis.call("ZADD", queueKey, score, id)
 
-		return 1
+		-- OK
+		return 0
 	`)
 
-	if err := script.Run(
+	code, err := script.Run(
 		ctx,
 		s.redisClient,
 		[]string{
 			s.taskScheduleKey(kind),
+			s.taskDataKey(kind),
 		},
 		id,
 		float64(time.Now().UnixMilli()),
-	).Err(); err != nil {
+	).Int()
+	if err != nil {
 		return err
 	}
 
-	return nil
+	switch code {
+	case 0:
+		return nil
+	case -1:
+		return ErrTaskDoesNotExist
+	default:
+		return ErrUnexpectedReturnCodeFromRedis
+	}
 }
 
 func (s *ScheduleImpl) On(ctx context.Context, kind string, handler func(ctx context.Context, task *Task)) error {
@@ -191,7 +306,7 @@ func (s *ScheduleImpl) On(ctx context.Context, kind string, handler func(ctx con
 
 		redis.call("ZADD", queueKey, nextTick, id)
 
-		return {id, score, taskDataRaw}
+		return {0, id, score, taskDataRaw}
 	`)
 
 	for {
