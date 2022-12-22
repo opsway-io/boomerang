@@ -30,11 +30,11 @@ func main() {
     task := boomerang.NewTask(
         "greeter",
         "some-unique-id",
-        time.Now().Add(5*time.Second),
         "Hello!",
     )
 
-    if err := sch.Add(ctx, task); err != nil {
+    // Schedule task for execution every second starting from now
+    if err := sch.Add(ctx, task, time.Second, time.Now()); err != nil {
         panic(err)
     }
 

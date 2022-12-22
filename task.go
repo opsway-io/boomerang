@@ -1,19 +1,15 @@
 package boomerang
 
-import "time"
-
 type Task struct {
-	Kind     string
-	ID       string
-	Interval time.Duration
-	Data     any
+	Kind string
+	ID   string
+	Data []byte
 }
 
-func NewTask(kind, id string, interval time.Duration, data any) *Task {
+func NewTask(kind string, id string, data []byte) *Task {
 	return &Task{
-		Kind:     kind,
-		ID:       id,
-		Interval: interval,
-		Data:     data,
+		Kind: kind,
+		ID:   id,
+		Data: data,
 	}
 }

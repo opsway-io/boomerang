@@ -12,10 +12,7 @@ import (
 var testTask1 = NewTask(
 	"test",
 	"id",
-	10*time.Millisecond,
-	map[string]any{
-		"foo": "bar",
-	},
+	[]byte("test data"),
 )
 
 func newSchedule(t *testing.T, ctx context.Context, db int) Schedule {
@@ -38,28 +35,11 @@ func TestScheduleImpl_Add(t *testing.T) {
 
 	schedule := newSchedule(t, ctx, 1)
 
-	err := schedule.Add(ctx, testTask1)
+	err := schedule.Add(ctx, testTask1, 10*time.Millisecond, time.Now())
 	assert.NoError(t, err)
 
-	err = schedule.Add(ctx, testTask1)
+	err = schedule.Add(ctx, testTask1, 10*time.Millisecond, time.Now())
 	assert.ErrorIs(t, err, ErrTaskAlreadyExists)
-}
-
-func TestScheduleImpl_Update(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-
-	schedule := newSchedule(t, ctx, 2)
-
-	err := schedule.Update(ctx, testTask1)
-	assert.ErrorIs(t, err, ErrTaskDoesNotExist)
-
-	err = schedule.Add(ctx, testTask1)
-	assert.NoError(t, err)
-
-	err = schedule.Update(ctx, testTask1)
-	assert.NoError(t, err)
 }
 
 func TestScheduleImpl_Remove(t *testing.T) {
@@ -72,7 +52,7 @@ func TestScheduleImpl_Remove(t *testing.T) {
 	err := schedule.Remove(ctx, testTask1.Kind, testTask1.ID)
 	assert.ErrorIs(t, err, ErrTaskDoesNotExist)
 
-	err = schedule.Add(ctx, testTask1)
+	err = schedule.Add(ctx, testTask1, 10*time.Millisecond, time.Now())
 	assert.NoError(t, err)
 
 	err = schedule.Remove(ctx, testTask1.Kind, testTask1.ID)
@@ -89,7 +69,7 @@ func TestScheduleImpl_RunNow(t *testing.T) {
 	err := schedule.RunNow(ctx, testTask1.Kind, testTask1.ID)
 	assert.ErrorIs(t, err, ErrTaskDoesNotExist)
 
-	err = schedule.Add(ctx, testTask1)
+	err = schedule.Add(ctx, testTask1, 10*time.Millisecond, time.Now())
 	assert.NoError(t, err)
 
 	err = schedule.RunNow(ctx, testTask1.Kind, testTask1.ID)
@@ -107,7 +87,7 @@ func TestScheduleImpl_On(t *testing.T) {
 
 	ctxA, cancelA := context.WithTimeout(ctx, 1*time.Second)
 
-	err := schedule.Add(ctx, testTask1)
+	err := schedule.Add(ctx, testTask1, 10*time.Millisecond, time.Now())
 	assert.NoError(t, err)
 
 	err = schedule.On(ctxA, testTask1.Kind, func(ctx context.Context, task *Task) {
@@ -125,4 +105,24 @@ func TestScheduleImpl_On(t *testing.T) {
 	})
 
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
+
+	err = schedule.Remove(ctx, testTask1.Kind, testTask1.ID)
+	assert.NoError(t, err)
+
+	// Test data unmarshalling.
+
+	ctxC, cancelC := context.WithTimeout(ctx, 1*time.Second)
+
+	err = schedule.Add(ctx, testTask1, 10*time.Millisecond, time.Now())
+	assert.NoError(t, err)
+
+	err = schedule.On(ctxC, testTask1.Kind, func(ctx context.Context, task *Task) {
+		assert.Equal(t, testTask1.Kind, task.Kind)
+		assert.Equal(t, testTask1.ID, task.ID)
+		assert.Equal(t, testTask1.Data, task.Data)
+
+		cancelC()
+	})
+
+	assert.ErrorIs(t, err, context.Canceled)
 }
