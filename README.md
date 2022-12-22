@@ -30,7 +30,7 @@ func main() {
     task := boomerang.NewTask(
         "greeter",
         "some-unique-id",
-        "Hello!",
+        []byte("Hello!"),
     )
 
     // Schedule task for execution every second starting from now
@@ -39,7 +39,7 @@ func main() {
     }
 
     sch.On(ctx, "greeter", func(ctx context.Context, task *boomerang.Task) {
-        fmt.Println(task.Data)
+        fmt.Printf("%s\n", task.Data)
     })
 }
 ```
