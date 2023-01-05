@@ -19,6 +19,7 @@ var (
 	ErrTaskDoesNotExist         = errors.New("task does not exist")
 	ErrTaskDataDoesNotExist     = errors.New("task data does not exist")
 	ErrTaskDataInvalidFormat    = errors.New("task data has invalid format, expected JSON")
+	ErrIntervalTooSmall         = errors.New("interval must be at least 1 millisecond")
 )
 
 type Schedule interface {
@@ -44,8 +45,13 @@ func NewSchedule(redisClient *redis.Client) Schedule {
 }
 
 func (s *ScheduleImpl) Add(ctx context.Context, task *Task, interval time.Duration, firstExecution time.Time) error {
+	msInterval := interval / time.Millisecond
+	if msInterval < 1 {
+		return ErrIntervalTooSmall
+	}
+
 	taskData, err := json.Marshal(TaskData{
-		Interval: interval / time.Millisecond,
+		Interval: msInterval,
 		Data:     task.Data,
 	})
 	if err != nil {
