@@ -25,6 +25,7 @@ var (
 type Schedule interface {
 	Add(ctx context.Context, task *Task, interval time.Duration, firstExecution time.Time) error
 	Remove(ctx context.Context, kind string, id string) error
+	Exists(ctx context.Context, kind string, id string) (bool, error)
 	RunNow(ctx context.Context, kind string, id string) error
 	On(ctx context.Context, kind string, handler func(ctx context.Context, task *Task)) error
 }
@@ -150,6 +151,22 @@ func (s *ScheduleImpl) Remove(ctx context.Context, kind string, id string) error
 	default:
 		return ErrUnexpectedReturnCode
 	}
+}
+
+func (s *ScheduleImpl) Exists(ctx context.Context, kind string, id string) (bool, error) {
+	scheduleKey := s.taskScheduleKey(kind)
+
+	exists, err := s.redisClient.ZScore(ctx, scheduleKey, id).Result()
+
+	if err == redis.Nil {
+		return false, nil
+	}
+
+	if err != nil {
+		return false, err
+	}
+
+	return exists != 0, nil
 }
 
 func (s *ScheduleImpl) RunNow(ctx context.Context, kind string, id string) error {
